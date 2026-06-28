@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>MAFIA WARS</title>
+<style>
+  :root{
+    --bg:#0c0c10; --panel:#16161d; --panel2:#1f1f29;
+    --accent:#cf6679; --accent2:#ffb74d; --good:#5ad17a; --bad:#ff5b6e;
+    --text:#f2f2f5; --muted:#8a8a96; --line:#2a2a36;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  body{
+    font-family:'Segoe UI',Tahoma,system-ui,sans-serif;
+    background:radial-gradient(1200px 600px at 50% -10%, #1a1620, var(--bg));
+    color:var(--text); margin:0; padding:16px;
+    min-height:100vh; display:flex; flex-direction:column; align-items:center;
+  }
+  .container{max-width:620px; width:100%;}
+  h1{
+    text-align:center; color:var(--accent); letter-spacing:4px;
+    text-transform:uppercase; margin:8px 0 18px; font-size:30px;
+    text-shadow:0 0 18px rgba(207,102,121,.4);
+  }
+  .panel{
+    background:var(--panel); padding:20px; border-radius:14px;
+    box-shadow:0 10px 30px rgba(0,0,0,.5); border:1px solid var(--line);
+  }
+  .screen{display:none;} .active{display:block; animation:fade .4s ease;}
+  @keyframes fade{from{opacity:0; transform:translateY(8px);} to{opacity:1;}}
+  input[type=text]{
+    width:100%; padding:14px; margin:10px 0; border:1px solid var(--line);
+    border-radius:10px; background:#0f0f15; color:#fff; font-size:16px;
+  }
+  button{
+    width:100%; background:linear-gradient(180deg,var(--accent),#b5566a);
+    color:#fff; border:none; padding:15px; font-weight:700; font-size:16px;
+    border-radius:10px; cursor:pointer; transition:.2s; margin-top:12px;
+    letter-spacing:.5px;
+  }
+  button:hover{filter:brightness(1.08);} button:active{transform:scale(.98);}
+  button.secondary{background:linear-gradient(180deg,#3a3a48,#2a2a36);}
+  .box{
+    background:var(--panel2); padding:16px; border-radius:10px;
+    border-left:5px solid var(--accent); margin:14px 0; font-size:17px;
+    text-align:center; line-height:1.5;
+  }
+  .box.good{border-color:var(--good);} .box.bad{border-color:var(--bad);}
+  .box.role{font-size:22px; font-weight:800; letter-spacing:1px;}
+  .role.mafia{color:var(--bad); border-color:var(--bad);}
+  .role.civ{color:var(--good); border-color:var(--good);}
+  .grid{list-style:none; padding:0; margin:0; display:grid;
+    grid-template-columns:1fr 1fr; gap:10px;}
+  .card{
+    background:var(--panel2); padding:14px; border-radius:10px;
+    text-align:center; border:2px solid transparent; font-size:15px;
+    word-break:break-word;
+  }
+  .card.host{border-color:var(--accent2);}
+  .card.click{cursor:pointer;} .card.click:hover{background:#26263200;}
+  .card.selected{border-color:var(--accent); background:#3a2226;}
+  #timer{font-size:26px; font-weight:800; color:var(--accent2);
+    text-align:center; margin:12px 0;}
+  .sub{color:var(--muted); text-align:center; font-size:14px; margin:6px 0;}
+  .dead{opacity:.45; text-decoration:line-through;}
+  .pill{display:inline-block; background:#0f0f15; border:1px solid var(--line);
+    border-radius:20px; padding:4px 12px; font-size:13px; color:var(--muted);
+    margin:4px auto;}
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Mafia Wars</h1>
+
+  <!-- CONNECT -->
+  <div id="connect-screen" class="screen panel active">
+    <div class="sub">Enter the host's address. Same machine = leave as is.</div>
+    <input type="text" id="server-ip" placeholder="Host IP (e.g. 192.168.1.5)" value="localhost">
+    <input type="text" id="username" placeholder="Your name">
+    <button onclick="connectAndJoin()">Join Game</button>
+    <div id="connect-msg" class="sub"></div>
+  </div>
+
+  <!-- LOBBY -->
+  <div id="lobby-screen" class="screen panel">
+    <div class="box">Waiting Room — <span id="player-count">0</span> players</div>
+    <ul id="lobby-list" class="grid"></ul>
+    <div id="lobby-hint" class="sub">First player is the Host and starts the game.</div>
+    <button id="start-btn" style="display:none;" onclick="startGame()">Start Game</button>
+  </div>
+
+  <!-- GAME -->
+  <div id="game-screen" class="screen panel">
+    <div id="role-reveal" class="box role">Assigning role…</div>
+    <div id="state-msg" class="box">Get ready…</div>
+    <div id="timer"></div>
+    <div id="board-label" class="sub" style="display:none;">Players</div>
+    <div id="action-board" class="grid"></div>
+    <button id="action-btn" style="display:none;" onclick="submitAction()">Confirm</button>
+  </div>
+
+  <!-- OVER -->
+  <div id="over-screen" class="screen panel">
+    <div id="over-msg" class="box role">Game Over</div>
+    <div id="over-detail" class="sub"></div>
+    <button id="newgame-btn" style="display:none;" onclick="newGame()">Start New Game</button>
+    <button class="secondary" onclick="location.reload()">Leave</button>
+  </div>
+</div>
+
+<script>
+let socket=null, myName="", myRole="Civilian", selected=null, isHost=false;
+let timerInt=null;
+
+function $(id){return document.getElementById(id);}
+function screen(id){
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  $(id).classList.add('active');
+}
+
+function connectAndJoin(){
+  const ip=$('server-ip').value.trim()||'localhost';
+  myName=$('username').value.trim();
+  if(!myName){$('connect-msg').textContent='Please enter a name.';return;}
+  $('connect-msg').textContent='Connecting…';
+  try{ socket=new WebSocket('ws://'+ip+':8080'); }
+  catch(e){ $('connect-msg').textContent='Bad address.'; return; }
+
+  socket.onopen=()=>{
+    $('connect-msg').textContent='Connected.';
+    socket.send(JSON.stringify({type:'join', name:myName}));
+  };
+  socket.onerror=()=>{ $('connect-msg').textContent='Could not reach host. Check IP and that the server is running.'; };
+  socket.onclose=()=>{ if($('over-screen').classList.contains('active'))return;
+    $('connect-msg').textContent='Disconnected.'; };
+  socket.onmessage=handleMessage;
+}
+
+function handleMessage(ev){
+  const d=JSON.parse(ev.data);
+  switch(d.type){
+    case 'joined': myName=d.name; screen('lobby-screen'); break;
+    case 'rejected': $('connect-msg').textContent=d.reason; break;
+    case 'lobbyUpdate': updateLobby(d); break;
+    case 'gameStarted': onGameStart(d); break;
+    case 'nightPhase': onNight(d); break;
+    case 'dayPhase': onDay(d); break;
+    case 'voteResult': onVoteResult(d); break;
+    case 'gameOver': onGameOver(d); break;
+  }
+}
+
+function updateLobby(d){
+  isHost=d.isHost;
+  $('player-count').textContent=d.players.length;
+  $('lobby-list').innerHTML=d.players.map(p=>
+    `<li class="card ${p.isHost?'host':''}">${p.name}${p.isHost?' 👑':''}</li>`).join('');
+  if(isHost){
+    $('start-btn').style.display=d.canStart?'block':'none';
+    $('lobby-hint').textContent=d.canStart?'You are the Host. Start when ready.':'You are the Host. Need more players to start.';
+  }else{
+    $('start-btn').style.display='none';
+    $('lobby-hint').textContent='Waiting for the Host to start…';
+  }
+}
+
+function onGameStart(d){
+  screen('game-screen');
+  myRole=d.role; selected=null;
+  const r=$('role-reveal');
+  r.className='box role '+(myRole==='Mafia'?'mafia':'civ');
+  r.textContent='YOUR ROLE: '+myRole.toUpperCase();
+  $('state-msg').textContent = myRole==='Mafia'
+    ? 'You are the Mafia. Blend in. Eliminate the town one by one.'
+    : 'You are a Civilian. Find the Mafia before it is too late.';
+  $('action-board').innerHTML='';
+  $('board-label').style.display='none';
+  $('action-btn').style.display='none';
+  $('timer').textContent='';
+}
+
+function onNight(d){
+  selected=null;
+  $('action-btn').style.display='none';
+  $('board-label').style.display='block';
+  clearTimer();
+  if(myRole==='Mafia'){
+    $('state-msg').className='box bad';
+    $('state-msg').innerHTML='🌙 <b>NIGHT</b><br>Choose a Civilian to eliminate.';
+    populate(d.alivePlayers, true);
+  }else{
+    $('state-msg').className='box';
+    $('state-msg').innerHTML='🌙 <b>NIGHT</b><br>Everyone, close your eyes. The Mafia is choosing…';
+    populate(d.alivePlayers, false);
+  }
+}
+
+function onDay(d){
+  selected=null;
+  $('state-msg').className='box';
+  const killedTxt = d.killed ? `<b>${d.killed}</b> was killed last night.` : 'No one was killed last night.';
+  $('state-msg').innerHTML=`☀️ <b>DAY</b><br>${killedTxt}<br>Discuss, then vote out who you suspect.`;
+  $('board-label').style.display='block';
+  $('board-label').textContent='Vote to eliminate';
+  populate(d.alivePlayers, true);
+  startTimer(d.duration);
+}
+
+function onVoteResult(d){
+  clearTimer();
+  $('action-board').innerHTML='';
+  $('board-label').style.display='none';
+  $('action-btn').style.display='none';
+  const box=$('state-msg');
+  box.className='box '+(d.wasMafia?'good':'bad');
+  box.innerHTML='🗳️ '+d.message;
+}
+
+function onGameOver(d){
+  clearTimer();
+  screen('over-screen');
+  const m=$('over-msg');
+  m.className='box role '+(d.winner==='CIVILIANS'?'civ':'mafia');
+  m.textContent=(d.winner==='CIVILIANS'?'CIVILIANS WIN':'MAFIA WINS');
+  $('over-detail').innerHTML=`${d.message}<br><span class="pill">The Mafia was: ${d.mafiaName}</span>`;
+  $('newgame-btn').style.display=isHost?'block':'none';
+}
+
+function populate(players, interactive){
+  const board=$('action-board'); board.innerHTML='';
+  players.forEach(p=>{
+    const div=document.createElement('div');
+    div.className='card';
+    div.textContent=p.name;
+    if(p.name===myName) div.textContent+=' (you)';
+    if(interactive && p.name!==myName){
+      div.classList.add('click');
+      div.onclick=()=>{
+        document.querySelectorAll('#action-board .card').forEach(c=>c.classList.remove('selected'));
+        div.classList.add('selected');
+        selected=p.name;
+        $('action-btn').style.display='block';
+        $('action-btn').textContent = (myRole==='Mafia' && isNight()) ? 'Confirm Kill' : 'Confirm Vote';
+      };
+    }
+    board.appendChild(div);
+  });
+}
+function isNight(){ return $('state-msg').innerHTML.includes('NIGHT'); }
+
+function submitAction(){
+  if(!selected){ alert('Select a player first.'); return; }
+  socket.send(JSON.stringify({type:'action', target:selected}));
+  $('action-btn').style.display='none';
+  document.querySelectorAll('#action-board .card').forEach(c=>c.classList.add('locked'));
+  $('state-msg').className='box';
+  $('state-msg').innerHTML='✅ Your choice is locked in. Waiting for others…';
+}
+
+function startGame(){ socket.send(JSON.stringify({type:'start'})); }
+function newGame(){ socket.send(JSON.stringify({type:'newGame'})); screen('lobby-screen'); }
+
+function startTimer(sec){
+  clearTimer();
+  let t=sec;
+  $('timer').textContent='⏳ '+t+'s';
+  timerInt=setInterval(()=>{
+    t--;
+    if(t<=0){ clearTimer(); $('timer').textContent="⏳ Time's up!"; return; }
+    $('timer').textContent='⏳ '+t+'s';
+  },1000);
+}
+function clearTimer(){ if(timerInt){clearInterval(timerInt); timerInt=null;} $('timer').textContent=''; }
+</script>
+</body>
+</html>

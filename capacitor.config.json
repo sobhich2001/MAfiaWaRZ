@@ -1,0 +1,9 @@
+{
+  "appId": "com.revo.mafiawars",
+  "appName": "Mafia Wars",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "http",
+    "cleartext": true
+  }
+}
